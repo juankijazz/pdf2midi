@@ -1,0 +1,4 @@
+homr==0.7.0
+pypdfium2>=4.30
+mido>=1.3
+pyinstaller>=6.10
