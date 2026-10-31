@@ -56,3 +56,18 @@ Tarda unos minutos y deja `dist\PDF2MIDI.exe` (≈ 270 MB, con los modelos inclu
     src/pdf2midi/gui.py           ventana (carpetas de entrada/salida, progreso, vigilancia)
     pdf2midi.spec                 receta de PyInstaller (un solo .exe)
     build_windows.bat             construcción local · .github/workflows/build.yml  construcción en la nube
+
+## Probar otros motores OMR (Legato, Transcoda…) y compararlos con homr
+`tools/compare_omr.py` mide, nota a nota, cuánto se parece la salida de cada motor a un MIDI de referencia
+(`tools/reference/Gershwin_Prelude_2_manual.mid` es una transcripción manual del Preludio nº 2; no es una verdad
+absoluta, sirve para comparar motores entre sí). Acepta `.mid`, `.musicxml`, `.abc` (Legato) y `.krn` (Transcoda/SMT):
+
+    pip install music21 mido
+    python tools/compare_omr.py tools/reference/Gershwin_Prelude_2_manual.mid ^
+        homr=Salida\Prelude_2_pagina1.musicxml+Salida\Prelude_2_pagina2.musicxml+Salida\Prelude_2_pagina3.musicxml ^
+        legato=legato.abc  transcoda=transcoda.krn
+
+- **Legato** (ICLR 2026): demo web sin instalar nada en https://guangyangmusic-legato-demo.hf.space/ (acepta PDF de hasta 3 páginas y
+  da MusicXML). En local: `github.com/guang-yng/legato` (el modelo de Hugging Face pide aceptar sus condiciones).
+- **Transcoda** (2026, 59 M de parámetros, salida **kern): `github.com/btrkeks/transcoda`, modelo `btrkeks/transcoda-59M-zeroshot-v1`.
+- RTX 50xx (Blackwell): instala PyTorch con CUDA 12.8 o superior; los requisitos antiguos pueden no reconocer la 5080.
