@@ -3,6 +3,7 @@ name: Build PDF2MIDI.exe
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     tags: ["v*"]
 
 jobs:
