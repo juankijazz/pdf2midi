@@ -17,6 +17,16 @@ También por línea de comandos:
 
     PDF2MIDI.exe partitura.pdf CARPETA_SALIDA --bpm 88 --pedal
 
+## IA local opcional (pestaña «IA local (visión)»)
+Conecta con un modelo de visión que tengas corriendo en tu equipo y que hable el protocolo OpenAI:
+**LM Studio** (`http://localhost:1234/v1`), **Unsloth Studio** (`http://localhost:8888/v1`, con la clave de
+Settings → API), Ollama, llama.cpp o vLLM. Elige servidor, pulsa «Buscar modelos», elige uno con visión
+y «Probar conexión y visión».
+Con la casilla activada, el modelo lee de cada página el **tempo (♩ = 88), matices (p, mf…), crescendo/diminuendo,
+rit., a tempo y calderones**, y se aplican al MIDI. Las notas siguen saliendo del motor OMR integrado:
+los modelos de visión locales no leen bien un pentagrama, pero sí el texto impreso.
+Modelos recomendados: Qwen3-VL 8B (12-16 GB) o 32B (24 GB+), Gemma 3/4 con visión, MiniCPM-V 4.5.
+
 ## Calidad
 El reconocimiento de partituras (OMR) es automático y **no es perfecto**: en páginas sencillas acierta casi todo, pero puede fallar con alteraciones, voces superpuestas, tresillos o
 cambios de armadura. Por eso, junto al `.mid` se guarda un `.musicxml` por página: ábrelo en

@@ -18,7 +18,9 @@ def default_root() -> Path:
 def load() -> dict:
     root = default_root()
     cfg = {"entrada": str(root / "Entrada"), "salida": str(root / "Salida"),
-           "misma": False, "bpm": 90, "pedal": False, "musicxml": True, "rehacer": False}
+           "misma": False, "bpm": 90, "pedal": False, "musicxml": True, "rehacer": False,
+           "ia_usar": False, "ia_servidor": "LM Studio", "ia_url": "http://localhost:1234/v1",
+           "ia_key": "", "ia_modelo": ""}
     try:
         cfg.update(json.loads(config_path().read_text(encoding="utf-8")))
     except Exception:

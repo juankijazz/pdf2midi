@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .musicxml2midi import Score, merge_scores, parse_musicxml, write_midi
+from .llm import VisionClient
+from .markings import apply_markings, extract_markings
 
 LogFn = Callable[[str], None]
 
@@ -130,6 +132,7 @@ def convert_pdf(
     log: LogFn = print,
     progress: Optional[Callable[[float], None]] = None,
     cancel: Optional[Callable[[], bool]] = None,
+    vision: Optional[VisionClient] = None,
 ) -> Path:
     pdf_path, out_dir = Path(pdf_path), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -142,6 +145,7 @@ def convert_pdf(
             raise RuntimeError("El PDF no tiene páginas.")
         log(f"  {len(pages)} página(s). Reconociendo partitura (puede tardar ~1 min por página)…")
         scores: list[Score] = []
+        page_imgs: list[str] = []
         for i, img in enumerate(pages, 1):
             if cancel and cancel():
                 raise Cancelled()
@@ -158,12 +162,15 @@ def convert_pdf(
                 log(f"  ⚠ Página {i}: no se encontraron notas.")
                 continue
             scores.append(sc)
+            page_imgs.append(img)
             log(f"  ✓ Página {i}: {len(sc.notes)} notas")
             if keep_musicxml:
                 shutil.copyfile(xml, out_dir / f"{name}_pagina{i}.musicxml")
         if not scores:
             raise RuntimeError("No se pudo reconocer ninguna nota en el PDF.")
         total = merge_scores(scores)
+        if vision is not None:
+            _read_markings(vision, total, scores, page_imgs, bpm, log, cancel)
         out = out_dir / f"{name}.mid"
         write_midi(total, str(out), bpm=bpm, pedal=pedal)
         if progress:
@@ -172,6 +179,27 @@ def convert_pdf(
         return out
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _read_markings(vision, total, scores, page_imgs, bpm, log, cancel) -> None:
+    """Pide al modelo de visión local el tempo y los matices de cada página y los aplica."""
+    log(f"  IA local ({vision.model}): leyendo tempo y matices…")
+    marks, base, first = [], float(bpm), 1
+    for i, (sc, img) in enumerate(zip(scores, page_imgs), 1):
+        if cancel and cancel():
+            raise Cancelled()
+        n = len(sc.measures)
+        try:
+            r = extract_markings(vision, img, i, first, n)
+            if i == 1 and r["tempo_bpm"]:
+                base = float(r["tempo_bpm"])
+                log(f"  ✓ Tempo leído de la partitura: negra = {int(base)}")
+            marks += r["markings"]
+        except Exception as e:
+            log(f"  ⚠ La IA no pudo leer la página {i}: {e}")
+        first += n
+    summary = apply_markings(total, marks, base)
+    log("  ✓ Matices aplicados: " + (", ".join(summary) if summary else "ninguno detectado"))
 
 
 def pending_pdfs(in_dir: Path, out_dir: Path, redo: bool = False) -> list[Path]:

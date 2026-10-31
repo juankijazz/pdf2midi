@@ -9,6 +9,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from . import __version__, config
 from .core import Cancelled, convert_pdf, pending_pdfs
+from .llm import PRESETS, LLMError, VisionClient
 
 
 def open_folder(path: str) -> None:
@@ -40,8 +41,12 @@ class App(tk.Tk):
     # ------------------------------------------------------------ UI
     def _build(self):
         pad = {"padx": 8, "pady": 4}
-        f = ttk.Frame(self, padding=10)
-        f.pack(fill="both", expand=True)
+        nb = ttk.Notebook(self)
+        nb.pack(fill="both", expand=True)
+        f = ttk.Frame(nb, padding=10)
+        nb.add(f, text="Convertir")
+        tab_ai = ttk.Frame(nb, padding=10)
+        nb.add(tab_ai, text="IA local (visión)")
 
         self.v_in = tk.StringVar(value=self.cfg["entrada"])
         self.v_out = tk.StringVar(value=self.cfg["salida"])
@@ -89,9 +94,84 @@ class App(tk.Tk):
         self.pb.pack(fill="x", **pad)
         self.log = tk.Text(f, height=14, state="disabled", wrap="word")
         self.log.pack(fill="both", expand=True, **pad)
+        self._build_ai(tab_ai)
         self._same_changed()
         self._log("Listo. Copia tus PDF a la carpeta de entrada y pulsa «Convertir».")
         self._log("Funciona con PDF escaneados (imagen) y con PDF vectoriales. Todo se procesa en tu equipo, sin internet.")
+
+    def _build_ai(self, t):
+        pad = {"padx": 8, "pady": 4}
+        c = self.cfg
+        self.v_ia_on = tk.BooleanVar(value=c["ia_usar"])
+        self.v_ia_srv = tk.StringVar(value=c["ia_servidor"])
+        self.v_ia_url = tk.StringVar(value=c["ia_url"])
+        self.v_ia_key = tk.StringVar(value=c["ia_key"])
+        self.v_ia_model = tk.StringVar(value=c["ia_modelo"])
+        self.v_ia_status = tk.StringVar(value="Sin comprobar.")
+
+        box = ttk.LabelFrame(t, text="Servidor local con modelo de visión (LM Studio, Unsloth Studio, Ollama…)")
+        box.pack(fill="x", **pad)
+        box.columnconfigure(1, weight=1)
+        ttk.Label(box, text="Servidor:").grid(row=0, column=0, sticky="w", **pad)
+        cb = ttk.Combobox(box, textvariable=self.v_ia_srv, values=list(PRESETS), state="readonly", width=28)
+        cb.grid(row=0, column=1, sticky="w", **pad)
+        cb.bind("<<ComboboxSelected>>", self._srv_changed)
+        ttk.Label(box, text="Dirección (URL):").grid(row=1, column=0, sticky="w", **pad)
+        ttk.Entry(box, textvariable=self.v_ia_url).grid(row=1, column=1, columnspan=2, sticky="ew", **pad)
+        ttk.Label(box, text="Clave de API:").grid(row=2, column=0, sticky="w", **pad)
+        ttk.Entry(box, textvariable=self.v_ia_key, show="•").grid(row=2, column=1, columnspan=2, sticky="ew", **pad)
+        ttk.Label(box, text="(Unsloth Studio la genera en Settings → API; LM Studio no la necesita)",
+                  foreground="#666").grid(row=3, column=1, columnspan=2, sticky="w", padx=8)
+        ttk.Button(box, text="Buscar modelos", command=self._ai_models).grid(row=4, column=0, **pad)
+        self.cb_model = ttk.Combobox(box, textvariable=self.v_ia_model, values=[], width=48)
+        self.cb_model.grid(row=4, column=1, sticky="ew", **pad)
+        ttk.Button(box, text="Probar conexión y visión", command=self._ai_test).grid(row=4, column=2, **pad)
+        ttk.Label(box, textvariable=self.v_ia_status, wraplength=640, justify="left").grid(
+            row=5, column=0, columnspan=3, sticky="w", **pad)
+
+        use = ttk.LabelFrame(t, text="Uso")
+        use.pack(fill="x", **pad)
+        ttk.Checkbutton(use, text="Usar la IA para leer tempo y matices de la partitura (p, mf, rit., a tempo, calderón…) "
+                                  "y aplicarlos al MIDI", variable=self.v_ia_on).pack(anchor="w", **pad)
+        ttk.Label(use, wraplength=680, justify="left", foreground="#444", text=(
+            "Las notas las reconoce siempre el motor OMR integrado. Los modelos de visión locales no leen bien "
+            "las notas de un pentagrama, pero sí el texto impreso, así que se usan para el tempo y los matices. "
+            "Si el servidor no responde, la conversión sigue sin la IA.")).pack(anchor="w", **pad)
+        ttk.Label(use, wraplength=680, justify="left", text=(
+            "Modelos recomendados (con visión): Qwen3-VL 8B (12-16 GB de memoria) · Qwen3-VL 32B (24 GB o más) · "
+            "Gemma 3/4 con visión · MiniCPM-V 4.5. En LM Studio busca «qwen3-vl» y, en la pestaña Developer, "
+            "arranca el servidor local (puerto 1234).")).pack(anchor="w", **pad)
+
+    def _srv_changed(self, _evt=None):
+        self.v_ia_url.set(PRESETS.get(self.v_ia_srv.get(), self.v_ia_url.get()))
+
+    def _client(self) -> VisionClient:
+        return VisionClient(self.v_ia_url.get(), self.v_ia_model.get().strip(), self.v_ia_key.get())
+
+    def _ai_models(self):
+        self.v_ia_status.set("Buscando modelos…")
+        c = self._client()
+
+        def job():
+            try:
+                self.q.put(("ia_models", c.list_models()))
+            except Exception as e:
+                self.q.put(("ia_status", f"✖ {e}"))
+        threading.Thread(target=job, daemon=True).start()
+
+    def _ai_test(self):
+        if not self.v_ia_model.get().strip():
+            self.v_ia_status.set("Elige primero un modelo (pulsa «Buscar modelos»).")
+            return
+        self.v_ia_status.set("Probando… (la primera respuesta de un modelo recién cargado puede tardar)")
+        c = self._client()
+
+        def job():
+            try:
+                self.q.put(("ia_status", c.test_vision()))
+            except Exception as e:
+                self.q.put(("ia_status", f"✖ {e}"))
+        threading.Thread(target=job, daemon=True).start()
 
     # ------------------------------------------------------------ helpers
     def _choose(self, var):
@@ -117,7 +197,8 @@ class App(tk.Tk):
     def _save_cfg(self):
         config.save({"entrada": self.v_in.get(), "salida": self.v_out.get(), "misma": self.v_same.get(),
                      "bpm": self.v_bpm.get(), "pedal": self.v_pedal.get(), "musicxml": self.v_xml.get(),
-                     "rehacer": self.v_redo.get()})
+                     "rehacer": self.v_redo.get(), "ia_usar": self.v_ia_on.get(), "ia_servidor": self.v_ia_srv.get(),
+                     "ia_url": self.v_ia_url.get(), "ia_key": self.v_ia_key.get(), "ia_modelo": self.v_ia_model.get()})
 
     def _pump(self):
         try:
@@ -127,6 +208,13 @@ class App(tk.Tk):
                     self._log(val)
                 elif kind == "pb":
                     self.pb["value"] = val
+                elif kind == "ia_models":
+                    self.cb_model["values"] = val
+                    if val and self.v_ia_model.get() not in val:
+                        self.v_ia_model.set(val[0])
+                    self.v_ia_status.set(f"✔ {len(val)} modelo(s) disponibles. Elige uno con visión y pulsa «Probar».")
+                elif kind == "ia_status":
+                    self.v_ia_status.set(val)
                 elif kind == "done":
                     self.b_go.configure(state="normal")
                     self.b_cancel.configure(state="disabled")
@@ -156,6 +244,11 @@ class App(tk.Tk):
         self.b_go.configure(state="disabled")
         self.b_cancel.configure(state="normal")
         opts = dict(bpm=float(self.v_bpm.get()), pedal=self.v_pedal.get(), keep_musicxml=self.v_xml.get())
+        if self.v_ia_on.get():
+            if self.v_ia_model.get().strip():
+                opts["vision"] = self._client()
+            else:
+                self._log("⚠ La IA está activada pero no hay modelo elegido: se convierte sin ella.")
         self.worker = threading.Thread(target=self._run, args=(files, out_dir, opts), daemon=True)
         self.worker.start()
 
